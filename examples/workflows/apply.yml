@@ -1,0 +1,90 @@
+# Merge to main: plan each root module again, compare with the summary that
+# was reviewed on the pull request, and apply only if they match.
+#
+# Each module is applied in its own job from a plan made in that same job, so
+# no plan file is passed between jobs. A mismatch fails only that module.
+name: Apply
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: read # to find the merged pull request
+
+env:
+  BUCKET: my-plan-summaries
+  TFPM_VERSION: v0.1.0
+  TFPM_SHA256: <sha256 of go-tfplan-manager-linux-amd64>
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dir: [envs/staging/network, envs/staging/app]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_wrapper: false
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::111111111111:role/apply
+          aws-region: us-east-1
+
+      - name: Install go-tfplan-manager
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -sSLo "$HOME/.local/bin/go-tfplan-manager" \
+            "https://github.com/akomic/go-tfplan-manager/releases/download/${TFPM_VERSION}/go-tfplan-manager-linux-amd64"
+          echo "${TFPM_SHA256}  $HOME/.local/bin/go-tfplan-manager" | sha256sum --check
+          chmod +x "$HOME/.local/bin/go-tfplan-manager"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Find the merged pull request
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          number=$(gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/pulls" --jq '.[0].number')
+          echo "number=${number}" >> "$GITHUB_OUTPUT"
+
+      - name: Plan
+        working-directory: ${{ matrix.dir }}
+        run: |
+          terraform init -input=false
+          terraform plan -input=false -out=tfplan
+          terraform show -json tfplan > tfplan.json
+
+      - name: Compare with the reviewed plan
+        id: compare
+        working-directory: ${{ matrix.dir }}
+        run: |
+          go-tfplan-manager summarize -name "${{ matrix.dir }}" -job-id "${{ job.check_run_id }}" -o current.json tfplan.json
+          aws s3 cp "s3://${BUCKET}/${{ github.event.repository.name }}/pr-${{ steps.pr.outputs.number }}/${{ matrix.dir }}/tfplan-summary.json" reviewed.json
+
+          set +e
+          go-tfplan-manager compare reviewed.json current.json > compare.txt
+          code=$?
+          set -e
+          cat compare.txt
+          { echo '```'; cat compare.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+          case "$code" in
+            0) echo "apply=true" >> "$GITHUB_OUTPUT" ;;
+            3) echo "::warning::Nothing left to apply in ${{ matrix.dir }}: the reviewed changes are already in place."
+               echo "apply=false" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::The plan for ${{ matrix.dir }} differs from the reviewed plan. Nothing was applied."
+               exit 1 ;;
+          esac
+
+      - name: Apply
+        if: steps.compare.outputs.apply == 'true'
+        working-directory: ${{ matrix.dir }}
+        run: terraform apply -input=false tfplan

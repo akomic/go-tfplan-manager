@@ -1,0 +1,4 @@
+/go-tfplan-manager
+/dist/
+*.test
+*.out

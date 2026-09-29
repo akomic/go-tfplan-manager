@@ -1,0 +1,106 @@
+{
+  "format_version": "1.2",
+  "terraform_version": "1.15.9",
+  "prior_state": {
+    "values": {
+      "root_module": {
+        "resources": [
+          {"address": "random_password.db", "values": {"result": "PRIOR-STATE-SECRET"}}
+        ]
+      }
+    }
+  },
+  "resource_changes": [
+    {
+      "address": "example_bucket.logs",
+      "mode": "managed",
+      "type": "example_bucket",
+      "name": "logs",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {"name": "logs", "tags": {"team": "platform"}},
+        "after_unknown": {"arn": true, "id": true}
+      }
+    },
+    {
+      "address": "example_instance.web",
+      "mode": "managed",
+      "type": "example_instance",
+      "name": "web",
+      "change": {
+        "actions": ["update"],
+        "before": {"size": "small", "tags": {"env": "old"}, "name": "web", "arn": "arn:example:1"},
+        "after": {"size": "large", "tags": {"env": "new"}, "name": "web"},
+        "after_unknown": {"arn": true, "tags": {}},
+        "before_sensitive": {},
+        "after_sensitive": {}
+      }
+    },
+    {
+      "address": "random_password.db",
+      "mode": "managed",
+      "type": "random_password",
+      "name": "db",
+      "change": {
+        "actions": ["update"],
+        "before": {"length": 16, "result": "BEFORE-SECRET"},
+        "after": {"length": 24, "result": "AFTER-SECRET"},
+        "after_unknown": {},
+        "before_sensitive": {"result": true},
+        "after_sensitive": {"result": true}
+      }
+    },
+    {
+      "address": "module.net.example_rule.ingress[0]",
+      "module_address": "module.net",
+      "mode": "managed",
+      "type": "example_rule",
+      "name": "ingress",
+      "index": 0,
+      "change": {
+        "actions": ["delete", "create"],
+        "before": {"cidr": "10.0.0.0/8", "port": 443},
+        "after": {"cidr": "10.1.0.0/16", "port": 443},
+        "after_unknown": {"id": true},
+        "replace_paths": [["cidr"], ["rules", 0, "from"]]
+      }
+    },
+    {
+      "address": "example_queue.old",
+      "mode": "managed",
+      "type": "example_queue",
+      "name": "old",
+      "change": {
+        "actions": ["delete"],
+        "before": {"name": "old"},
+        "after": null,
+        "after_unknown": {}
+      }
+    },
+    {
+      "address": "example_topic.same",
+      "mode": "managed",
+      "type": "example_topic",
+      "name": "same",
+      "change": {
+        "actions": ["no-op"],
+        "before": {"name": "same"},
+        "after": {"name": "same"},
+        "after_unknown": {}
+      }
+    },
+    {
+      "address": "data.example_zone.main",
+      "mode": "data",
+      "type": "example_zone",
+      "name": "main",
+      "change": {
+        "actions": ["read"],
+        "before": null,
+        "after": {"name": "example.test"},
+        "after_unknown": {"id": true}
+      }
+    }
+  ]
+}

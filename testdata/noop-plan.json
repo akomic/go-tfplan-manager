@@ -1,0 +1,18 @@
+{
+  "format_version": "1.2",
+  "terraform_version": "1.15.9",
+  "resource_changes": [
+    {
+      "address": "example_topic.same",
+      "mode": "managed",
+      "type": "example_topic",
+      "name": "same",
+      "change": {
+        "actions": ["no-op"],
+        "before": {"name": "same"},
+        "after": {"name": "same"},
+        "after_unknown": {}
+      }
+    }
+  ]
+}

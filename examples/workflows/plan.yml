@@ -1,0 +1,92 @@
+# Pull request: plan each root module, store a summary per module, and post
+# one combined comment on the pull request.
+#
+# Replace the placeholders: BUCKET, the role ARN, the module list and the
+# go-tfplan-manager version and SHA-256 (from the release's checksums.txt).
+name: Plan
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write # OIDC to AWS for plans and summary storage
+  pull-requests: write # the comment
+
+env:
+  BUCKET: my-plan-summaries
+  PREFIX: ${{ github.event.repository.name }}/pr-${{ github.event.pull_request.number }}
+  TFPM_VERSION: v0.1.0
+  TFPM_SHA256: <sha256 of go-tfplan-manager-linux-amd64>
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dir: [envs/staging/network, envs/staging/app]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_wrapper: false
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::111111111111:role/plan
+          aws-region: us-east-1
+
+      - name: Install go-tfplan-manager
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -sSLo "$HOME/.local/bin/go-tfplan-manager" \
+            "https://github.com/akomic/go-tfplan-manager/releases/download/${TFPM_VERSION}/go-tfplan-manager-linux-amd64"
+          echo "${TFPM_SHA256}  $HOME/.local/bin/go-tfplan-manager" | sha256sum --check
+          chmod +x "$HOME/.local/bin/go-tfplan-manager"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Plan
+        working-directory: ${{ matrix.dir }}
+        run: |
+          terraform init -input=false
+          terraform plan -input=false -out=tfplan
+          terraform show -json tfplan > tfplan.json
+
+      - name: Summarize and store
+        working-directory: ${{ matrix.dir }}
+        run: |
+          # -job-id links the comment to this exact job.
+          go-tfplan-manager summarize -name "${{ matrix.dir }}" -job-id "${{ job.check_run_id }}" tfplan.json
+          aws s3 cp tfplan-summary.json "s3://${BUCKET}/${PREFIX}/${{ matrix.dir }}/tfplan-summary.json"
+
+  comment:
+    needs: plan
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::111111111111:role/plan
+          aws-region: us-east-1
+
+      - name: Install go-tfplan-manager
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -sSLo "$HOME/.local/bin/go-tfplan-manager" \
+            "https://github.com/akomic/go-tfplan-manager/releases/download/${TFPM_VERSION}/go-tfplan-manager-linux-amd64"
+          echo "${TFPM_SHA256}  $HOME/.local/bin/go-tfplan-manager" | sha256sum --check
+          chmod +x "$HOME/.local/bin/go-tfplan-manager"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Render and post the comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          aws s3 cp --recursive "s3://${BUCKET}/${PREFIX}/" summaries/
+          go-tfplan-manager render -o comment.md summaries/
+          # Update the previous plan comment instead of adding a new one.
+          gh pr comment "${{ github.event.pull_request.number }}" --repo "${{ github.repository }}" \
+            --body-file comment.md --edit-last --create-if-none
